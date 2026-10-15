@@ -23,6 +23,16 @@ Four layers, expected to end up as roughly one module each:
 - Platform: x86-64 Linux only. Dynamically-linked, `-O0 -fno-omit-frame-pointer` target binaries only for v1 — static buffer-size recovery is unreliable against optimized/stripped binaries (frame pointer omission, inlining), and this is a known, accepted limitation rather than something to solve in v1.
 - Out of scope for v1: heap bugs (UAF/double-free), format-string `%n` writes, non-x86-64 targets, statically-linked targets (no PLT), multi-threaded targets, exploit generation (detection only).
 
+### Open issue: statically-linked binaries in `ElfReader::load()`
+
+`ElfReader::load()` currently only checks `ELFCLASS64` + `EM_X86_64`, so a
+statically-linked ELF64 x86-64 binary passes `load()` even though static
+linking is out of scope for v1 (no PLT to enumerate). For now this is
+intentional — `load()` returns `true`, and `findDangerousPltEntries()` will
+just come back empty for such a binary once implemented. Revisit whether
+`load()` itself should reject static binaries outright when PLT enumeration
+(M0 remainder) is implemented.
+
 ## Milestones (implementation order)
 
 - M0: ELF parsing — enumerate PLT entries for dangerous functions, no execution yet.

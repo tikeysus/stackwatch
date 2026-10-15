@@ -22,11 +22,13 @@ public:
 	bool load();
 
 	// Returns PLT call sites for any dangerous function present in the
-	// binary's dynamic symbol table.
+	// binary's dynamic symbol table. Precondition: load() must have
+	// returned true. Throws std::logic_error otherwise.
 	std::vector<DangerousCallSite> findDangerousPltEntries() const;
 
 private:
 	std::string path_;
+	bool loaded_ = false;
 };
 
 } // namespace stackwatch
