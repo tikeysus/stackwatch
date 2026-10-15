@@ -23,15 +23,18 @@ Four layers, expected to end up as roughly one module each:
 - Platform: x86-64 Linux only. Dynamically-linked, `-O0 -fno-omit-frame-pointer` target binaries only for v1 — static buffer-size recovery is unreliable against optimized/stripped binaries (frame pointer omission, inlining), and this is a known, accepted limitation rather than something to solve in v1.
 - Out of scope for v1: heap bugs (UAF/double-free), format-string `%n` writes, non-x86-64 targets, statically-linked targets (no PLT), multi-threaded targets, exploit generation (detection only).
 
-### Open issue: statically-linked binaries in `ElfReader::load()`
+### Decision: reject statically-linked binaries in `ElfReader::load()`
 
-`ElfReader::load()` currently only checks `ELFCLASS64` + `EM_X86_64`, so a
-statically-linked ELF64 x86-64 binary passes `load()` even though static
-linking is out of scope for v1 (no PLT to enumerate). For now this is
-intentional — `load()` returns `true`, and `findDangerousPltEntries()` will
-just come back empty for such a binary once implemented. Revisit whether
-`load()` itself should reject static binaries outright when PLT enumeration
-(M0 remainder) is implemented.
+Static binaries are rejected outright in `load()`, not left to silently
+produce empty results from `findDangerousPltEntries()`. Detection: no
+`PT_DYNAMIC` program header present → `load()` returns `false`.
+
+Reasoning: static linking has no PLT/GOT, so there's no single call-site
+address to breakpoint per dangerous function. Supporting it would mean
+locating inlined/statically-linked copies of each dangerous function via
+instruction-byte signature matching (glibc build/version/SIMD-variant
+dependent) instead of one known PLT stub address — a fundamentally
+different and much less reliable detection strategy. Out of scope for v1.
 
 ## Milestones (implementation order)
 
