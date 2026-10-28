@@ -29,6 +29,7 @@ public:
 private:
 	std::string path_;
 	bool loaded_ = false;
+	std::vector<DangerousCallSite> dangerous_sites_;
 };
 
 } // namespace stackwatch

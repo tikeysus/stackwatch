@@ -86,6 +86,46 @@ int main() {
 		check(threw, "findDangerousPltEntries() before load() throws");
 	}
 
+	// 14. Dynamic binary with no dangerous calls resolves to an empty list.
+	{
+		stackwatch::ElfReader reader(fixture("hello_dyn"));
+		reader.load();
+		check(reader.findDangerousPltEntries().empty(),
+			"findDangerousPltEntries() on hello_dyn returns no entries");
+	}
+
+	// 15. Shared object with no dangerous calls resolves to an empty list.
+	{
+		stackwatch::ElfReader reader(fixture("libhello.so"));
+		reader.load();
+		check(reader.findDangerousPltEntries().empty(),
+			"findDangerousPltEntries() on libhello.so returns no entries");
+	}
+
+	// 16. findDangerousPltEntries() throws on a rejected static binary
+	// (load() returned false, so loaded_ stays false).
+	{
+		stackwatch::ElfReader reader(fixture("hello_static"));
+		reader.load();
+		bool threw = false;
+		try {
+			reader.findDangerousPltEntries();
+		} catch (const std::logic_error&) {
+			threw = true;
+		}
+		check(threw, "findDangerousPltEntries() throws after rejected static binary");
+	}
+
+	// 17. findDangerousPltEntries() is stable across repeated calls.
+	{
+		stackwatch::ElfReader reader(fixture("hello_dyn"));
+		reader.load();
+		auto first = reader.findDangerousPltEntries();
+		auto second = reader.findDangerousPltEntries();
+		check(first.size() == second.size(),
+			"findDangerousPltEntries() returns consistent results across calls");
+	}
+
 	if (g_failures == 0) {
 		std::printf("\nAll test cases passed.\n");
 		return 0;

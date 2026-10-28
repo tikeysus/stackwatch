@@ -6,5 +6,6 @@
 - [ ] Enumerate `.dynsym` entries
 - [ ] Resolve PLT stub addresses for `strcpy`, `gets`, `sprintf`, `strcat`, `memcpy` via `.rela.plt`
 - [ ] Print found call sites for a sample dynamically-linked binary
+- [ ] Cross-compile a `hello_vuln` fixture (calls e.g. `strcpy`) to add a positive findDangerousPltEntries() test asserting the resolved PLT address is correct
 
 See `CLAUDE.md` for the full milestone list (M0-M6).
