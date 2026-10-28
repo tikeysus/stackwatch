@@ -62,9 +62,9 @@ int main() {
 	std::filesystem::create_directories(fixture("hello_directory"));
 	check(loadOf("hello_directory") == false, "directory path rejected");
 
-	// 11. Statically-linked ELF64 x86-64 currently accepted (decision pending,
-	// see AGENTS.md note under M0).
-	check(loadOf("hello_static") == true, "static binary currently accepted");
+	// 11. Statically-linked ELF64 x86-64 is rejected (no PT_DYNAMIC segment).
+	// See AGENTS.md: "Decision: reject statically-linked binaries".
+	check(loadOf("hello_static") == false, "static binary rejected");
 
 	// 12. load() is idempotent across repeated calls.
 	{

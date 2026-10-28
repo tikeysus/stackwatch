@@ -7,6 +7,19 @@
 
 namespace stackwatch {
 
+namespace {
+
+bool hasDynamicSegment(const ELFIO::elfio& reader) {
+	for (unsigned int i = 0; i < reader.segments.size(); ++i) {
+		if (reader.segments[i]->get_type() == ELFIO::PT_DYNAMIC) {
+			return true;
+		}
+	}
+	return false;
+}
+
+} // namespace
+
 ElfReader::ElfReader(std::string path) : path_(std::move(path)) {}
 
 bool ElfReader::load() {
@@ -23,6 +36,9 @@ bool ElfReader::load() {
 		return false;
 	}
 	if (reader.get_machine() != ELFIO::EM_X86_64) {
+		return false;
+	}
+	if (!hasDynamicSegment(reader)) {
 		return false;
 	}
 
