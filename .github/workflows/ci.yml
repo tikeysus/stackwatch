@@ -1,0 +1,29 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  build-test:
+    # ubuntu-latest runners are native x86-64. That is the whole point of this
+    # workflow: local development runs under qemu TCG emulation on an arm64
+    # Mac, so the tracer's ptrace/register code only ever meets real hardware
+    # here. Timing-shaped bugs (waitpid races, signal ordering) that hide at
+    # emulated speed surface in CI.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config libcapstone-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
