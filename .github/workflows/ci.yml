@@ -4,20 +4,41 @@ on: [push, pull_request]
 
 jobs:
   build-test:
-    # ubuntu-latest runners are native x86-64. That is the whole point of this
+    # The runner host is native x86-64, which is the whole point of this
     # workflow: local development runs under qemu TCG emulation on an arm64
     # Mac, so the tracer's ptrace/register code only ever meets real hardware
     # here. Timing-shaped bugs (waitpid races, signal ordering) that hide at
     # emulated speed surface in CI.
     runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+    # Debian 13 matches the local qemu VM and the planned M5 cloud box, so all
+    # three environments share one glibc and one capstone version. It also
+    # avoids the runner image's Ubuntu mirrors: archive/security.ubuntu.com
+    # failed DNS resolution on 2026-11-11 while other hosts resolved fine.
+    container:
+      image: debian:trixie
+      # Needed from M1 onward: PTRACE_TRACEME on your own child is allowed
+      # unprivileged, but register reads via PTRACE_GETREGS are not reliably
+      # permitted under the default container capability set.
+      options: --cap-add=SYS_PTRACE
 
+    steps:
+      # Before checkout, so actions/checkout finds a real git binary rather
+      # than falling back to the REST tarball download.
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config libcapstone-dev
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config libcapstone-dev \
+            git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Record toolchain versions
+        run: |
+          uname -m
+          gcc -dumpmachine
+          pkg-config --modversion capstone
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
