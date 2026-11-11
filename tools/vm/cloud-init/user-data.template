@@ -1,0 +1,108 @@
+#cloud-config
+# Template. make-seed.sh fills in the SSH public key, the username and the
+# share mount point before building the seed ISO, so no key material is ever
+# committed to the repo. The placeholder tokens are deliberately NOT named in
+# this comment: substitution is line-based, and naming them here would inject
+# a second, malformed copy of the key at the top of the rendered file.
+
+hostname: stackwatch-vm
+
+users:
+  - name: __VM_USER__
+    groups: [sudo]
+    shell: /bin/bash
+    # NOPASSWD because the account has no password at all -- key-only login,
+    # and a sudo prompt on a serial console we never attach to would be
+    # unanswerable.
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+
+# The cloud image root filesystem is ~2G; fetch-image.sh grows the virtual
+# disk to 20G and these two grow the partition and filesystem to match.
+growpart:
+  mode: auto
+  devices: ["/"]
+resize_rootfs: true
+
+packages:
+  - build-essential
+  - cmake
+  - pkg-config
+  - libcapstone-dev
+  - gdb
+  - git
+  - file
+package_update: true
+
+# The repo, shared from the Mac over 9p. msize is raised from the 8K default
+# because the default makes header-heavy C++ builds crawl; _netdev keeps
+# systemd from ordering the mount before the virtio transport exists.
+# nofail matters: without it a failed 9p mount takes local-fs.target down with
+# it, which turns a broken share into a failed boot rather than a missing
+# directory.
+mounts:
+  - [ stackwatch, __SHARE_MOUNT__, 9p,
+      "trans=virtio,version=9p2000.L,msize=524288,rw,_netdev,nofail", "0", "0" ]
+
+write_files:
+  # Diagnostics to the serial console, which the host captures to
+  # console.log. This VM is headless with a write-only serial device, so if
+  # key-based ssh fails there is otherwise no way in and nothing to read.
+  - path: /usr/local/sbin/stackwatch-selfcheck
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      exec > >(tee -a /dev/console) 2>&1
+      echo "===== STACKWATCH SELFCHECK BEGIN ====="
+      echo "--- arch ---"; uname -m; uname -r
+      echo "--- home ownership (StrictModes cares about these) ---"
+      ls -ld /home /home/__VM_USER__ /home/__VM_USER__/.ssh 2>&1
+      ls -l /home/__VM_USER__/.ssh/authorized_keys 2>&1
+      echo "--- user ---"; id __VM_USER__ 2>&1; getent passwd __VM_USER__
+      echo "--- sshd effective config ---"
+      sshd -T 2>&1 | grep -iE "^(strictmodes|pubkeyauthentication|authorizedkeysfile|allowusers|allowgroups|denyusers|permitrootlogin|usepam)"
+      echo "--- sshd config drop-ins ---"
+      ls -l /etc/ssh/sshd_config.d/ 2>&1; cat /etc/ssh/sshd_config.d/* 2>/dev/null
+      echo "--- 9p mount ---"; mount | grep -i 9p || echo "9p NOT MOUNTED"
+      ls -la /home/__VM_USER__/stackwatch 2>&1 | head -5
+      echo "--- toolchain ---"
+      gcc -dumpmachine 2>&1; pkg-config --modversion capstone 2>&1; cmake --version 2>&1 | head -1
+      echo "--- recent ssh auth failures ---"
+      journalctl -u ssh -u sshd --no-pager -n 25 2>&1 | tail -25
+      echo "===== STACKWATCH SELFCHECK END ====="
+
+# bootcmd runs on EVERY boot, unlike runcmd which is first-boot-only. Home
+# ownership is re-asserted here so that a future image or cloud-init change
+# reintroducing the root-owned home cannot silently lock ssh out again. Fails
+# harmlessly on the very first boot, before the user exists.
+bootcmd:
+  - [ bash, -c, "getent passwd __VM_USER__ >/dev/null && chown __VM_USER__:__VM_USER__ /home/__VM_USER__ || true" ]
+  # Any leftover debug drop-in is removed on every boot: DEBUG3 logging is
+  # slow enough under emulation to push the key exchange past a client's
+  # connect timeout, which then presents as an authentication failure.
+  - [ bash, -c, "rm -f /etc/ssh/sshd_config.d/99-stackwatch-debug.conf" ]
+
+runcmd:
+  # The share uses security_model=mapped-xattr: the guest's view of ownership
+  # comes from user.virtfs.* xattrs on the host files, which do not exist yet,
+  # so everything initially appears root-owned and the build user cannot write.
+  # This one-time pass writes those xattrs. .git is pruned deliberately --
+  # rewriting ownership metadata across every loose object is slow and
+  # pointless, since all git operations stay on the Mac side.
+  - [ bash, -c, "find /home/__VM_USER__/stackwatch -name .git -prune -o -print0 | xargs -0r chown __VM_USER__:__VM_USER__" ]
+  # sshd's StrictModes refuses a key if the home directory, .ssh or
+  # authorized_keys are writable by anyone but the owner. Asserted explicitly
+  # rather than assumed, because a wrong mode here presents as an
+  # indistinguishable "Permission denied (publickey)".
+  # The home directory itself is created root-owned (mode 700) on this image,
+  # which leaves uid 1000 unable to traverse into its own home. Debian 13's
+  # split sshd-auth helper then cannot read authorized_keys through it, and the
+  # failure presents as a plain "Permission denied (publickey)" with the
+  # correct key in place. Chowned non-recursively on purpose: -R here would
+  # descend into the 9p share and .git for no reason.
+  - [ bash, -c, "chown __VM_USER__:__VM_USER__ /home/__VM_USER__" ]
+  - [ bash, -c, "chown -R __VM_USER__:__VM_USER__ /home/__VM_USER__/.ssh && chmod 700 /home/__VM_USER__ /home/__VM_USER__/.ssh && chmod 600 /home/__VM_USER__/.ssh/authorized_keys" ]
+  - [ bash, -c, "systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true" ]
+  - [ bash, -c, "printf 'stackwatch x86-64 dev VM\\nrepo: %s\\n' /home/__VM_USER__/stackwatch > /etc/motd" ]
+  - [ /usr/local/sbin/stackwatch-selfcheck ]

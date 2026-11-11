@@ -1,0 +1,153 @@
+#!/bin/bash
+# Single entry point for the x86-64 development VM.
+#
+# Replaces the four-step dance of start-vm.sh, a long ssh line with the right
+# key flags, a cd, and stop-vm.sh. Every subcommand brings the VM up first if
+# it is not already running, so there is no ordering to remember.
+#
+#   stackwatch-vm            open a shell in the guest, in the repo
+#   stackwatch-vm build      build in the guest
+#   stackwatch-vm test       build, then run ctest
+#   stackwatch-vm ptrace     prove PTRACE_GETREGS works (M1 sanity check)
+#   stackwatch-vm run ...    run an arbitrary command in the repo
+#   stackwatch-vm stop       shut the guest down cleanly
+#   stackwatch-vm status     report whether it is up, and where things live
+#
+# Put it on your PATH if you like:
+#   ln -s ~/Documents/projects/stackwatch/tools/vm/stackwatch-vm /usr/local/bin/
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$here/config.sh"
+
+# Where builds land. Deliberately the guest's own disk, not the 9p share:
+# x86-64 objects must not collide with the Mac-side build/ directory, and
+# build output over 9p is slower than output to local disk.
+GUEST_BUILD="/home/$VM_USER/build-vm"
+GUEST_REPO="$SHARE_MOUNT"
+
+vm_running() {
+	[[ -f "$VM_PID" ]] && kill -0 "$(cat "$VM_PID")" 2>/dev/null
+}
+
+# Bring the guest up unless it is already answering. Checked with an actual
+# ssh probe rather than just the pidfile: qemu can be alive while the guest
+# is still booting, or wedged.
+ensure_up() {
+	if vm_running && ssh_vm true 2>/dev/null; then
+		return 0
+	fi
+	if vm_running; then
+		echo "VM process is up but not answering ssh; waiting..."
+	else
+		echo "Starting the VM..."
+	fi
+	"$here/start-vm.sh"
+}
+
+guest_build() {
+	ensure_up
+	ssh_vm "cmake -S '$GUEST_REPO' -B '$GUEST_BUILD' -DCMAKE_BUILD_TYPE=Debug >/dev/null && cmake --build '$GUEST_BUILD' -j\$(nproc)"
+}
+
+cmd="${1:-shell}"
+[[ $# -gt 0 ]] && shift
+
+case "$cmd" in
+shell)
+	ensure_up
+	echo "Opening a shell in $GUEST_REPO. 'exit' leaves the VM running; 'stackwatch-vm stop' shuts it down."
+	# -t for a real tty; exec bash -l so the shell is a login shell sitting
+	# in the repo rather than a non-interactive command.
+	exec ssh -t \
+		-p "$VM_SSH_PORT" \
+		-o ConnectTimeout=30 \
+		-o StrictHostKeyChecking=accept-new \
+		-o UserKnownHostsFile="$VM_KNOWN_HOSTS" \
+		-o IdentitiesOnly=yes \
+		-i "$VM_SSH_KEY" \
+		"$VM_USER@localhost" \
+		"cd '$GUEST_REPO' && exec bash -l"
+	;;
+
+build)
+	guest_build
+	;;
+
+test)
+	guest_build
+	ssh_vm "ctest --test-dir '$GUEST_BUILD' --output-on-failure"
+	;;
+
+ptrace)
+	# The one capability this VM exists to provide. Worth being able to
+	# re-check in one command: an amd64 container under Rosetta gets as far
+	# as the exec stop and then fails PTRACE_GETREGS with EIO.
+	ensure_up
+	ssh_vm 'cat > /tmp/ptrace_check.c <<"CSRC"
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <sys/ptrace.h>
+#include <sys/wait.h>
+#include <sys/user.h>
+int main(void) {
+	pid_t pid = fork();
+	if (pid == 0) { ptrace(PTRACE_TRACEME,0,0,0); execl("/bin/true","true",NULL); _exit(43); }
+	int st; waitpid(pid,&st,0);
+	struct user_regs_struct r;
+	if (ptrace(PTRACE_GETREGS,pid,0,&r) < 0) { printf("FAIL PTRACE_GETREGS: %s\n", strerror(errno)); return 1; }
+	printf("ok PTRACE_GETREGS  rip=0x%llx rsp=0x%llx\n",(unsigned long long)r.rip,(unsigned long long)r.rsp);
+	errno=0; long w = ptrace(PTRACE_PEEKDATA,pid,(void*)r.rip,0);
+	if (w==-1 && errno) { printf("FAIL PTRACE_PEEKDATA: %s\n", strerror(errno)); return 1; }
+	printf("ok PTRACE_PEEKDATA at rip: 0x%lx\n", w);
+	ptrace(PTRACE_KILL,pid,0,0); waitpid(pid,&st,0); return 0;
+}
+CSRC
+gcc -O0 -fno-omit-frame-pointer /tmp/ptrace_check.c -o /tmp/ptrace_check && /tmp/ptrace_check'
+	;;
+
+run)
+	if [[ $# -eq 0 ]]; then
+		echo "usage: stackwatch-vm run <command...>" >&2
+		exit 2
+	fi
+	ensure_up
+	ssh_vm "cd '$GUEST_REPO' && $*"
+	;;
+
+stop)
+	"$here/stop-vm.sh"
+	;;
+
+status)
+	if vm_running; then
+		echo "VM:        running (pid $(cat "$VM_PID"))"
+		if ssh_vm true 2>/dev/null; then
+			echo "ssh:       answering on port $VM_SSH_PORT"
+			echo "guest:     $(ssh_vm 'uname -m; uname -r' 2>/dev/null | paste -sd' ' -)"
+		else
+			echo "ssh:       NOT answering (still booting?)"
+		fi
+	else
+		echo "VM:        not running"
+	fi
+	echo "disk:      $VM_DISK"
+	echo "key:       $VM_SSH_KEY"
+	echo "repo:      $SHARE_PATH  ->  $GUEST_REPO (9p)"
+	echo "build dir: $GUEST_BUILD (guest-local)"
+	echo "console:   $VM_LOG"
+	;;
+
+-h | --help | help)
+	sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+	;;
+
+*)
+	echo "unknown subcommand: $cmd" >&2
+	echo "try: stackwatch-vm help" >&2
+	exit 2
+	;;
+esac

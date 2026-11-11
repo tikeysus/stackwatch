@@ -32,7 +32,7 @@ jobs:
             build-essential cmake pkg-config libcapstone-dev \
             git ca-certificates
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Record toolchain versions
         run: |
