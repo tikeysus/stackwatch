@@ -6,7 +6,7 @@
 # THEORY.md for why the CET/non-CET split matters.
 #
 # Produces, in tests/fixtures/:
-#   hello_vuln             default toolchain flags (CET -> split .plt/.plt.sec)
+#   hello_vuln             CET with -z ibtplt     (split .plt + .plt.sec)
 #   hello_vuln_nocet       -fcf-protection=none   (classic single .plt)
 #   hello_vuln_norelaplt   hello_vuln with .rela.plt stripped
 #   *.plt.expected         {name, address} oracle per binary, from objdump
@@ -23,7 +23,13 @@ CFLAGS="-O0 -fno-omit-frame-pointer -fno-builtin"
 
 echo "toolchain: $(gcc -dumpmachine), $(gcc -dumpversion)"
 
-gcc $CFLAGS -fcf-protection=full -o "$fixtures/hello_vuln" "$src"
+# -z ibtplt is what actually makes GNU ld emit a split .plt/.plt.sec;
+# -fcf-protection alone only marks the object as CET-capable. Verified on
+# Debian 13: with default link flags no .plt.sec appears, and none of its
+# system binaries carry one either. -z lazy keeps the lazy-binding stubs
+# that .plt.sec is layered over.
+gcc $CFLAGS -fcf-protection=full -Wl,-z,ibtplt -Wl,-z,lazy \
+	-o "$fixtures/hello_vuln" "$src"
 gcc $CFLAGS -fcf-protection=none -o "$fixtures/hello_vuln_nocet" "$src"
 
 # A binary with a .plt but no .rela.plt, to prove the resolver returns an
