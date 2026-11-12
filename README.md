@@ -9,10 +9,11 @@ saved return address.
 
 ## Status
 
-M0 (ELF parsing / PLT resolution) is nearly complete: `ElfReader` validates
-a target, resolves PLT stub addresses for the dangerous-function set from
-`.rela.plt`, and `stackwatch <binary>` prints them. No tracing, disassembly,
-or overflow detection yet — those are M1-M3. See `AGENTS.md` for the full
+M0 (ELF parsing / PLT resolution) is complete: `ElfReader` validates a
+target, resolves PLT stub addresses for the dangerous-function set from
+`.rela.plt` — handling both the classic `.plt` layout and the `.plt.sec`
+split that Intel CET produces — and `stackwatch <binary>` prints them. No
+tracing, disassembly, or overflow detection yet; those are M1-M3. See `AGENTS.md` for the full
 architecture and milestone list (M0-M6), `TODO.md` for the current
 milestone's checklist, and `THEORY.md` for PLT/GOT background.
 

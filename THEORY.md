@@ -60,9 +60,30 @@ Crucially `.plt.sec` has **no PLT0 header**, so its indexing is
 a CET binary yields an address one stub too high, and breakpointing it would
 trap on the wrong function or mid-instruction.
 
-gcc has defaulted to `-fcf-protection=full` on Debian/Ubuntu for years, so
-most binaries on a modern distro have `.plt.sec`. Hence the rule: **if
-`.plt.sec` is present, resolve against it; otherwise fall back to `.plt`.**
+Hence the rule stackwatch follows: **if `.plt.sec` is present, resolve
+against it (`base + i * 16`); otherwise fall back to `.plt`
+(`base + 16 + i * 16`).**
+
+### What's actually out there (measured on Debian 13, gcc 14)
+
+`-fcf-protection=full` alone does **not** produce a `.plt.sec`. It marks the
+object as CET-capable, but GNU ld only splits the table when asked:
+
+    -fcf-protection=full                        -> .plt .plt.got
+    -fcf-protection=full -Wl,-z,lazy            -> .plt .plt.got
+    -fcf-protection=full -Wl,-z,ibtplt          -> .plt .plt.got .plt.sec
+    -fcf-protection=full -Wl,-z,lazy,-z,ibtplt  -> .plt .plt.got .plt.sec
+    -fcf-protection=full -Wl,-z,lazy,-z,ibt     -> .plt .plt.got .plt.sec
+
+And no Debian 13 system binary carries one: `ls`, `cat`, `cp`, `objdump`,
+`find`, `sed`, `grep`, `dash`, `apt-get` and libc itself are all `.plt` +
+`.plt.got`, 0 of 9. Distros that pass `-z ibtplt` (Fedora/RHEL) do ship
+`.plt.sec` binaries, so the support is worth having — but on Debian the
+classic path is the one that runs.
+
+This is why `tests/fixtures/hello_vuln` is built with an explicit
+`-Wl,-z,ibtplt`: without it the fixture silently exercises the classic
+layout and the `.plt.sec` branch gets no coverage at all.
 
 ### Further reading
 
