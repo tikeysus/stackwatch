@@ -9,9 +9,12 @@ saved return address.
 
 ## Status
 
-Scaffold only — no detection logic implemented yet. Currently on M0 (ELF
-parsing / PLT resolution). See `CLAUDE.md` for the full architecture and
-milestone list (M0-M6), and `TODO.md` for the current milestone's checklist.
+M0 (ELF parsing / PLT resolution) is nearly complete: `ElfReader` validates
+a target, resolves PLT stub addresses for the dangerous-function set from
+`.rela.plt`, and `stackwatch <binary>` prints them. No tracing, disassembly,
+or overflow detection yet — those are M1-M3. See `AGENTS.md` for the full
+architecture and milestone list (M0-M6), `TODO.md` for the current
+milestone's checklist, and `THEORY.md` for PLT/GOT background.
 
 ## Building
 
