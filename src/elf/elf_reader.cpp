@@ -1,5 +1,6 @@
 #include "elf/elf_reader.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <set>
 #include <stdexcept>
@@ -26,16 +27,33 @@ bool hasDynamicSegment(const ELFIO::elfio& reader) {
 	return false;
 }
 
-// Standard x86-64 lazy-binding PLT layout: a 16-byte PLT0 resolver stub,
-// followed by one 16-byte stub per .rela.plt entry, in matching order.
-// Breaks under split .plt.sec/Intel CET binaries; accepted v1 limitation
-// (same category as the project's optimized-binary caveat in AGENTS.md).
+constexpr uint64_t kPltEntrySize = 16;
+
+// Address of the first PLT stub that call sites actually target.
+//
+// Under Intel CET the linker emits .plt.sec: one 16-byte endbr64 stub per
+// .rela.plt entry, with no resolver header, and `call strcpy@plt` targets
+// that section instead of .plt. Without CET the stubs live in .plt behind a
+// 16-byte PLT0 resolver header, so the first one starts one entry in.
+// Either way stub i corresponds to relocation i. See THEORY.md.
+bool firstPltStubAddress(const ELFIO::elfio& reader, uint64_t& base) {
+	if (const ELFIO::section* plt_sec = reader.sections[".plt.sec"]) {
+		base = plt_sec->get_address();
+		return true;
+	}
+	if (const ELFIO::section* plt = reader.sections[".plt"]) {
+		base = plt->get_address() + kPltEntrySize;
+		return true;
+	}
+	return false;
+}
+
 std::vector<DangerousCallSite> resolveDangerousPltEntries(const ELFIO::elfio& reader) {
 	std::vector<DangerousCallSite> sites;
 
-	const ELFIO::section* plt_section = reader.sections[".plt"];
+	uint64_t stub_base = 0;
 	const ELFIO::section* relplt_section = reader.sections[".rela.plt"];
-	if (plt_section == nullptr || relplt_section == nullptr) {
+	if (relplt_section == nullptr || !firstPltStubAddress(reader, stub_base)) {
 		return sites;
 	}
 
@@ -57,7 +75,7 @@ std::vector<DangerousCallSite> resolveDangerousPltEntries(const ELFIO::elfio& re
 		if (dangerous.find(symbol_name) == dangerous.end()) {
 			continue;
 		}
-		uint64_t plt_address = plt_section->get_address() + 16 + static_cast<uint64_t>(i) * 16;
+		uint64_t plt_address = stub_base + static_cast<uint64_t>(i) * kPltEntrySize;
 		sites.push_back({symbol_name, plt_address});
 	}
 

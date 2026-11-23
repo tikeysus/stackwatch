@@ -36,6 +36,21 @@ instruction-byte signature matching (glibc build/version/SIMD-variant
 dependent) instead of one known PLT stub address — a fundamentally
 different and much less reliable detection strategy. Out of scope for v1.
 
+### Note: test-suite state at M0 close (2026-11-23)
+
+`tests/elf_reader_test.cpp` case 11 is the normative assertion for the
+decision above: `loadOf("hello_static") == false`. Issue #2 tracked
+aligning it and was closed with M0.
+
+Two things left dangling, to revisit:
+
+- Issue #2's acceptance criteria said "ctest passes, 13/13". The suite has
+  since grown to 23 cases, so that number is stale wherever it is quoted.
+- The suite was **not** re-run immediately before the M0 branch merged: it
+  needs an x86-64 Linux environment (`tools/vm/`), and the merge was done
+  from macOS. Run `ctest --test-dir build --output-on-failure` in the VM
+  before building on top of M0.
+
 ## Milestones (implementation order)
 
 - M0: ELF parsing — enumerate PLT entries for dangerous functions, no execution yet.
