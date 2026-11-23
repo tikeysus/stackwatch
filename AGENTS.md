@@ -42,14 +42,19 @@ different and much less reliable detection strategy. Out of scope for v1.
 decision above: `loadOf("hello_static") == false`. Issue #2 tracked
 aligning it and was closed with M0.
 
-Two things left dangling, to revisit:
+Verified green on 2026-11-23 in the x86-64 VM (`tools/vm/stackwatch-vm
+test`), after the merge of PR #3: 23/23 cases, 0 failures.
 
-- Issue #2's acceptance criteria said "ctest passes, 13/13". The suite has
-  since grown to 23 cases, so that number is stale wherever it is quoted.
-- The suite was **not** re-run immediately before the M0 branch merged: it
-  needs an x86-64 Linux environment (`tools/vm/`), and the merge was done
-  from macOS. Run `ctest --test-dir build --output-on-failure` in the VM
-  before building on top of M0.
+Two things to know when reading that output:
+
+- `ctest` reports "1 test" because the suite is one registered target. The
+  23 cases live inside that binary; `check()` accumulates into
+  `g_failures` rather than aborting, so all 23 run and the binary exits
+  nonzero if any fail. Issue #2's "13/13" acceptance criterion is stale.
+- `skip()` cases (those needing the `hello_vuln` fixtures, which require an
+  x86-64 toolchain to build) print `[SKIP]` and do not count as failures,
+  so the ctest summary cannot distinguish "passed" from "skipped". Run the
+  test binary directly to see the per-case list.
 
 ## Milestones (implementation order)
 
